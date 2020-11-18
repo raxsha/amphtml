@@ -58,6 +58,10 @@ import {installUrlReplacementsForEmbed} from '../../../src/service/url-replaceme
 import {isAdPositionAllowed} from '../../../src/ad-helper';
 import {isArray, isEnumValue, isObject} from '../../../src/types';
 import {listenOnce} from '../../../src/event-helper';
+import {
+  observeWithSharedInOb,
+  unobserveWithSharedInOb,
+} from '../../../src/viewport-observer';
 import {padStart} from '../../../src/string';
 import {parseJson} from '../../../src/json';
 import {processHead} from './head-validation';
@@ -67,6 +71,7 @@ import {streamResponseToWriter} from '../../../src/utils/stream-response';
 import {triggerAnalyticsEvent} from '../../../src/analytics';
 import {tryResolve} from '../../../src/utils/promise';
 import {utf8Decode} from '../../../src/utils/bytes';
+import {whenWithinViewport} from './within-viewport';
 
 /** @type {Array<string>} */
 const METADATA_STRINGS = [
@@ -367,6 +372,9 @@ export class AmpA4A extends AMP.BaseElement {
      * @private {?function(!Element)}
      */
     this.transferDomBody_ = null;
+
+    /** @private {function(boolean)} */
+    this.boundViewportCallback_ = this.viewportCallbackTemp.bind(this);
   }
 
   /** @override */
@@ -625,6 +633,28 @@ export class AmpA4A extends AMP.BaseElement {
   }
 
   /**
+   * Resolves when underlying element is within the viewport range given or
+   * has been loaded already.
+   * @param {number|boolean} viewport derived from renderOutsideViewport.
+   * @return {!Promise}
+   * @protected
+   */
+  whenWithinViewport(viewport) {
+    devAssert(viewport !== false);
+    const resource = this.getResource();
+    if (WITHIN_VIEWPORT_INOB || getMode().localDev || getMode().test) {
+      // Resolve is already laid out or viewport is true.
+      if (!resource.isLayoutPending() || viewport === true) {
+        return Promise.resolve();
+      }
+      // Track when within the specified number of viewports.
+      const viewportNum = dev().assertNumber(viewport);
+      return whenWithinViewport(this.element, viewportNum);
+    }
+    return resource.whenWithinViewport(viewport);
+  }
+
+  /**
    * This is the entry point into the ad promise chain.
    *
    * Calling this function will initiate the following sequence of events: ad
@@ -670,7 +700,7 @@ export class AmpA4A extends AMP.BaseElement {
         // meeting the definition as opposed to waiting on the promise.
         const delay = this.delayAdRequestEnabled();
         if (delay) {
-          return this.getResource().whenWithinViewport(
+          return this.whenWithinViewport(
             typeof delay == 'number' ? delay : this.renderOutsideViewport()
           );
         }
@@ -1235,7 +1265,9 @@ export class AmpA4A extends AMP.BaseElement {
     if (this.isRefreshing) {
       this.destroyFrame(true);
     }
-    return this.attemptToRenderCreative();
+    return this.attemptToRenderCreative().then(() => {
+      observeWithSharedInOb(this.element, this.boundViewportCallback_);
+    });
   }
 
   /**
@@ -1326,6 +1358,7 @@ export class AmpA4A extends AMP.BaseElement {
 
   /** @override  */
   unlayoutCallback() {
+    unobserveWithSharedInOb(this.element);
     this.tearDownSlot();
     return true;
   }
@@ -1402,8 +1435,12 @@ export class AmpA4A extends AMP.BaseElement {
     }
   }
 
-  /** @override  */
-  viewportCallback(inViewport) {
+  // TODO: Rename to viewportCallback once BaseElement.viewportCallback has been removed.
+  /**
+   * @param {boolean}  inViewport
+   * @protected
+   */
+  viewportCallbackTemp(inViewport) {
     if (this.xOriginIframeHandler_) {
       this.xOriginIframeHandler_.viewportCallback(inViewport);
     }
@@ -1653,7 +1690,7 @@ export class AmpA4A extends AMP.BaseElement {
     const {height, width} = this.creativeSize_;
     const {extensions, fonts, head} = headData;
     this.iframe = createSecureFrame(
-      this.element.ownerDocument,
+      this.win,
       this.getIframeTitle(),
       height,
       width
@@ -2204,11 +2241,15 @@ export class AmpA4A extends AMP.BaseElement {
   tryExecuteRealTimeConfig_(consentState, consentString, consentMetadata) {
     if (!!AMP.RealTimeConfigManager) {
       try {
-        return new AMP.RealTimeConfigManager(this).maybeExecuteRealTimeConfig(
+        return new AMP.RealTimeConfigManager(
+          this.getAmpDoc()
+        ).maybeExecuteRealTimeConfig(
+          this.element,
           this.getCustomRealTimeConfigMacros_(),
           consentState,
           consentString,
-          consentMetadata
+          consentMetadata,
+          this.verifyStillCurrent()
         );
       } catch (err) {
         user().error(TAG, 'Could not perform Real Time Config.', err);

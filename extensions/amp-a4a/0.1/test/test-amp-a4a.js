@@ -44,7 +44,7 @@ import {FetchMock, networkFailure} from './fetch-mock';
 import {FriendlyIframeEmbed} from '../../../../src/friendly-iframe-embed';
 import {LayoutPriority} from '../../../../src/layout';
 import {MockA4AImpl, TEST_URL} from './utils';
-import {RealTimeConfigManager} from '../real-time-config-manager';
+import {RealTimeConfigManager} from '../../../../src/service/real-time-config/real-time-config-impl';
 import {Services} from '../../../../src/services';
 import {Signals} from '../../../../src/utils/signals';
 import {cancellation} from '../../../../src/error';
@@ -89,7 +89,7 @@ if (NO_SIGNING_RTV) {
       );
     });
 
-    it('should contain the correct security features', async () => {
+    it('should contain the correct csp meta content', async () => {
       await a4a.buildCallback();
       a4a.onLayoutMeasure();
       await a4a.layoutCallback();
@@ -120,6 +120,32 @@ if (NO_SIGNING_RTV) {
           'https://use.fontawesome.com ' +
           'https://use.typekit.net ' +
           "'unsafe-inline';"
+      );
+    });
+
+    it('should set the correct sandbox features', async () => {
+      env.sandbox
+        .stub(Services.platformFor(env.win), 'isSafari')
+        .returns(false);
+      await a4a.buildCallback();
+      a4a.onLayoutMeasure();
+      await a4a.layoutCallback();
+      const fie = doc.body.querySelector('iframe[srcdoc]');
+      expect(fie.getAttribute('sandbox')).to.equal(
+        'allow-forms allow-popups allow-popups-to-escape-sandbox ' +
+          'allow-same-origin allow-top-navigation'
+      );
+    });
+
+    it('should add allow-scripts to sandbox in Safari', async () => {
+      env.sandbox.stub(Services.platformFor(env.win), 'isSafari').returns(true);
+      await a4a.buildCallback();
+      a4a.onLayoutMeasure();
+      await a4a.layoutCallback();
+      const fie = doc.body.querySelector('iframe[srcdoc]');
+      expect(fie.getAttribute('sandbox')).to.equal(
+        'allow-forms allow-popups allow-popups-to-escape-sandbox ' +
+          'allow-same-origin allow-top-navigation allow-scripts'
       );
     });
 
@@ -1388,7 +1414,16 @@ describe('amp-a4a', () => {
       expect(a4a.isVerifiedAmpCreative()).to.be.true;
       expect(tryExecuteRealTimeConfigSpy.calledOnce).to.be.true;
       expect(maybeExecuteRealTimeConfigStub.calledOnce).to.be.true;
-      expect(maybeExecuteRealTimeConfigStub.calledWith({}, null)).to.be.true;
+      expect(
+        maybeExecuteRealTimeConfigStub.calledWith(
+          a4aElement,
+          {},
+          null,
+          null,
+          null,
+          window.sandbox.match.any
+        )
+      ).to.be.true;
       expect(getAdUrlSpy.calledOnce, 'getAdUrl called exactly once').to.be.true;
       expect(
         getAdUrlSpy.calledWith(
@@ -1962,6 +1997,7 @@ describe('amp-a4a', () => {
     describe('delay request experiment', () => {
       let getAdUrlSpy;
       let a4a;
+
       beforeEach(async () => {
         const fixture = await createIframePromise();
         setupForAdTesting(fixture);
@@ -1975,48 +2011,54 @@ describe('amp-a4a', () => {
         a4a = new MockA4AImpl(a4aElement);
         getAdUrlSpy = window.sandbox.spy(a4a, 'getAdUrl');
       });
+
       it('should delay request until within renderOutsideViewport', async () => {
         window.sandbox.stub(a4a, 'delayAdRequestEnabled').returns(true);
         let whenWithinViewportResolve;
         getResourceStub.returns({
           getUpgradeDelayMs: () => 1,
           renderOutsideViewport: () => 3,
-          whenWithinViewport: (viewport) => {
-            expect(viewport).to.equal(3);
+        });
+        const whenWithinViewportStub = window.sandbox
+          .stub(a4a, 'whenWithinViewport')
+          .callsFake(() => {
             return new Promise((resolve) => {
               whenWithinViewportResolve = resolve;
             });
-          },
-        });
+          });
         a4a.buildCallback();
         a4a.onLayoutMeasure();
         expect(a4a.adPromise_).to.be.instanceof(Promise);
         // Delay to all getAdUrl to potentially execute.
         await Services.timerFor(a4a.win).promise(1);
         expect(getAdUrlSpy).to.not.be.called;
+        expect(whenWithinViewportStub).to.be.calledOnce.calledWith(3);
         whenWithinViewportResolve();
         await a4a.adPromise_;
         return expect(getAdUrlSpy).to.be.calledOnce;
       });
+
       it('should delay request until numeric value', async () => {
         window.sandbox.stub(a4a, 'delayAdRequestEnabled').returns(6);
         let whenWithinViewportResolve;
         getResourceStub.returns({
           getUpgradeDelayMs: () => 1,
           renderOutsideViewport: () => 3,
-          whenWithinViewport: (viewport) => {
-            expect(viewport).to.equal(6);
+        });
+        const whenWithinViewportStub = window.sandbox
+          .stub(a4a, 'whenWithinViewport')
+          .callsFake(() => {
             return new Promise((resolve) => {
               whenWithinViewportResolve = resolve;
             });
-          },
-        });
+          });
         a4a.buildCallback();
         a4a.onLayoutMeasure();
         expect(a4a.adPromise_).to.be.instanceof(Promise);
         // Delay to all getAdUrl to potentially execute.
         await Services.timerFor(a4a.win).promise(1);
         expect(getAdUrlSpy).to.not.be.called;
+        expect(whenWithinViewportStub).to.be.calledOnce.calledWith(6);
         whenWithinViewportResolve();
         await a4a.adPromise_;
         return expect(getAdUrlSpy).to.be.calledOnce;

@@ -24,11 +24,17 @@ var BaseCarouselDef = {};
  *   advanceCount: (number|undefined),
  *   arrowNext: (?PreactDef.VNode|undefined),
  *   arrowPrev: (?PreactDef.VNode|undefined),
+ *   autoAdvance: (boolean|undefined),
+ *   autoAdvanceCount: (number|undefined),
+ *   autoAdvanceInterval: (number|undefined),
+ *   autoAdvanceLoops: (number|undefined),
  *   children: (!PreactDef.Renderable),
  *   controls: (string|undefined),
  *   loop: (boolean|undefined),
+ *   mixedLength: (boolean|undefined),
  *   onSlideChange: (function(number):undefined|undefined),
  *   snap: (boolean|undefined),
+ *   snapBy: (number|undefined),
  *   visibleCount: (number|undefined),
  * }}
  */
@@ -39,9 +45,11 @@ BaseCarouselDef.Props;
  *   advanceCount: (number|undefined),
  *   children: !Array<PreactDef.Renderable>,
  *   loop: (boolean|undefined),
+ *   mixedLength: (boolean|undefined),
  *   restingIndex: number,
  *   setRestingIndex: (function(number):undefined),
  *   snap: (boolean|undefined),
+ *   snapBy: (number|undefined),
  *   visibleCount: (number|undefined),
  * }}
  */
@@ -49,12 +57,17 @@ BaseCarouselDef.ScrollerProps;
 
 /**
  * @typedef {{
+ *   alt: (string|undefined),
  *   children: !Array<PreactDef.Renderable>,
  *   loop: (boolean|undefined),
+ *   mixedLength: (boolean|undefined),
  *   offsetRef: {current: (null|number)},
  *   pivotIndex: number,
  *   restingIndex: number,
  *   snap: (boolean|undefined),
+ *   snapBy: (number|undefined),
+ *   src: (string|undefined),
+ *   thumbnailSrc: (string|undefined),
  *   visibleCount: (number|undefined),
  * }}
  */
@@ -75,8 +88,8 @@ BaseCarouselDef.ArrowProps;
  * @typedef {{
  *   currentSlide: (number|undefined),
  *   setCurrentSlide: (function(number):undefined),
- *   slideCount: (number|undefined),
- *   setSlideCount: (function(number):undefined),
+ *   slides: !Array<BaseCarouselDef.SlideProps>,
+ *   setSlides: (function(Array):undefined),
  * }}
  */
 BaseCarouselDef.ContextProps;

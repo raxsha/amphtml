@@ -28,21 +28,6 @@ import {userAssert} from '../../../src/log';
 /** @const {string} */
 const TAG = 'amp-base-carousel';
 
-/**
- * The boolean attribute value as resolved by string equality with "true" or "false".
- * If the attribute is not present, default as given.
- *
- * @param {!Element} element
- * @param {string} attr
- * @param {boolean} defaultValue
- * @return {boolean}
- */
-function parseStrBoolAttr(element, attr, defaultValue) {
-  return element.hasAttribute(attr)
-    ? element.getAttribute(attr) !== 'false'
-    : defaultValue;
-}
-
 /** @extends {PreactBaseElement<BaseCarouselDef.CarouselApi>} */
 class AmpBaseCarousel extends PreactBaseElement {
   /** @override */
@@ -95,6 +80,9 @@ AmpBaseCarousel['children'] = {
   },
   'children': {
     name: 'children',
+    props: {
+      'thumbnailSrc': {attr: 'data-thumbnail-src'},
+    },
     selector: '*', // This should be last as catch-all.
     single: false,
   },
@@ -102,15 +90,22 @@ AmpBaseCarousel['children'] = {
 
 /** @override */
 AmpBaseCarousel['props'] = {
-  'advanceCount': {attr: 'advance-count', type: 'number'},
-  'controls': {attr: 'controls', type: 'string'},
-  'loop': {attr: 'loop', type: 'boolean'},
-  'outsetArrows': {attr: 'outset-arrows', type: 'boolean'},
-  'snap': {
-    attrs: ['snap'],
-    parseAttrs: (element) => parseStrBoolAttr(element, 'snap', true),
+  'advanceCount': {attr: 'advance-count', type: 'number', media: true},
+  'autoAdvance': {attr: 'auto-advance', type: 'boolean', media: true},
+  'autoAdvanceCount': {attr: 'auto-advance-count', type: 'number', media: true},
+  'autoAdvanceInterval': {
+    attr: 'auto-advance-interval',
+    type: 'number',
+    media: true,
   },
-  'visibleCount': {attr: 'visible-count', type: 'number'},
+  'autoAdvanceLoops': {attr: 'auto-advance-loops', type: 'number', media: true},
+  'controls': {attr: 'controls', type: 'string', media: true},
+  'loop': {attr: 'loop', type: 'boolean', media: true},
+  'mixedLength': {attr: 'mixed-length', type: 'boolean', media: true},
+  'outsetArrows': {attr: 'outset-arrows', type: 'boolean', media: true},
+  'snap': {attr: 'snap', type: 'boolean', media: true, default: true},
+  'snapBy': {attr: 'snap-by', type: 'number', media: true},
+  'visibleCount': {attr: 'visible-count', type: 'number', media: true},
 };
 
 /** @override */

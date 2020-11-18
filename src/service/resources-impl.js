@@ -31,6 +31,7 @@ import {getSourceUrl} from '../url';
 import {hasNextNodeInDocumentOrder, isIframed} from '../dom';
 import {ieIntrinsicCheckAndFix} from './ie-intrinsic-bug';
 import {ieMediaCheckAndFix} from './ie-media-bug';
+import {isAmp4Email} from '../format';
 import {isBlockedByConsent, reportError} from '../error';
 import {isExperimentOn} from '../experiments';
 import {listen, loadPromise} from '../event-helper';
@@ -208,18 +209,6 @@ export class ResourcesImpl {
       this.ampdoc.getVisibilityState()
     );
 
-    /**
-     * Number of resources that were laid out after entering viewport.
-     * @private {number}
-     */
-    this.slowLayoutCount_ = 0;
-
-    /**
-     * Total number of laid out resources.
-     * @private {number}
-     */
-    this.totalLayoutCount_ = 0;
-
     /** @private {?IntersectionObserver} */
     this.intersectionObserver_ = null;
 
@@ -229,7 +218,10 @@ export class ResourcesImpl {
      */
     this.intersectionObserverCallbackFired_ = false;
 
-    if (isExperimentOn(this.win, 'intersect-resources')) {
+    if (
+      isExperimentOn(this.win, 'intersect-resources') &&
+      !isAmp4Email(this.win.document)
+    ) {
       const iframed = isIframed(this.win);
 
       // Classic IntersectionObserver doesn't support viewport tracking and
@@ -262,9 +254,16 @@ export class ResourcesImpl {
         this.relayoutAll_ = true;
         this.maybeChangeHeight_ = true;
       }
+
       // With IntersectionObserver, we only need to handle viewport resize.
       if (this.relayoutAll_ || !this.intersectionObserver_) {
         this.schedulePass();
+      }
+      // Unfortunately, a viewport size change invalidates all premeasurements.
+      if (this.relayoutAll_ && this.intersectionObserver_) {
+        this.resources_.forEach((resource) =>
+          resource.invalidatePremeasurementAndRequestMeasure()
+        );
       }
     });
     this.viewport_.onScroll(() => {
@@ -826,14 +825,6 @@ export class ResourcesImpl {
     }
   }
 
-  /** @override */
-  getSlowElementRatio() {
-    if (this.totalLayoutCount_ === 0) {
-      return 0;
-    }
-    return this.slowLayoutCount_ / this.totalLayoutCount_;
-  }
-
   /**
    * Returns `true` when there's mutate work currently batched.
    * @return {boolean}
@@ -1254,7 +1245,7 @@ export class ResourcesImpl {
         const expediteFirstMeasure =
           !r.hasBeenMeasured() && r.element.tagName == 'AMP-AD';
         const needsMeasure =
-          premeasured || requested || this.relayoutAll_ || expediteFirstMeasure;
+          premeasured || requested || relayoutAll || expediteFirstMeasure;
         if (needsMeasure) {
           const isDisplayed = this.measureResource_(
             r,
@@ -1339,7 +1330,7 @@ export class ResourcesImpl {
         expandLayoutRect(viewportRect, 0.25, 0.25)
       : viewportRect;
 
-    // Phase 3: Trigger "viewport enter/exit" events.
+    // Phase 3: Set inViewport status for resources.
     for (let i = 0; i < this.resources_.length; i++) {
       const r = this.resources_[i];
       if (r.getState() == ResourceState.NOT_BUILT || r.hasOwner()) {
@@ -1664,11 +1655,6 @@ export class ResourcesImpl {
    * @private
    */
   taskComplete_(task, success, opt_reason) {
-    this.totalLayoutCount_++;
-    if (task.resource.isInViewport() && this.firstVisibleTime_ >= 0) {
-      this.slowLayoutCount_++;
-    }
-
     this.exec_.dequeue(task);
     this.schedulePass(POST_TASK_PASS_DELAY_);
     if (!success) {
@@ -1928,7 +1914,10 @@ export class ResourcesImpl {
    * @private
    */
   cleanupTasks_(resource, opt_removePending) {
-    if (resource.getState() == ResourceState.NOT_LAID_OUT) {
+    if (
+      resource.getState() == ResourceState.NOT_LAID_OUT ||
+      resource.getState() == ResourceState.READY_FOR_LAYOUT
+    ) {
       // If the layout promise for this resource has not resolved yet, remove
       // it from the task queues to make sure this resource can be rescheduled
       // for layout again later on.

@@ -1079,6 +1079,13 @@ describes.realWin('amp-ad-network-doubleclick-impl', realWinConfig, (env) => {
         expect(url).to.not.match(/(=|%2C)2106317(3|4)(%2C|&|$)/);
       });
     });
+
+    it('does not set ptt parameter by default', () =>
+      expect(impl.getAdUrl()).to.not.eventually.match(/(\?|&)ptt=(&|$)/));
+    it('sets ptt parameter', () => {
+      impl.experimentIds = ['21068094'];
+      return expect(impl.getAdUrl()).to.eventually.match(/(\?|&)ptt=13(&|$)/);
+    });
   });
 
   describe('#getPageParameters', () => {
@@ -1729,9 +1736,7 @@ describes.realWin(
           'type': 'doubleclick',
         });
         impl = new AmpAdNetworkDoubleclickImpl(element);
-        env.sandbox
-          .stub(impl, 'getResource')
-          .returns({whenWithinViewport: () => Promise.resolve()});
+        env.sandbox.stub(impl, 'whenWithinViewport').returns(Promise.resolve());
       });
 
       it('should use experiment value', () => {

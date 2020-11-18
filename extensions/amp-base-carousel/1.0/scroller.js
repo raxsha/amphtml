@@ -46,42 +46,80 @@ const RESET_SCROLL_REFERENCE_POINT_WAIT_MS = 200;
 function ScrollerWithRef(
   {
     advanceCount,
+    autoAdvanceCount,
     children,
     loop,
+    mixedLength,
     restingIndex,
     setRestingIndex,
     snap,
+    snapBy = 1,
     visibleCount,
+    _thumbnails,
+    ...rest
   },
   ref
 ) {
   // We still need our own ref that we can always rely on to be there.
   const containerRef = useRef(null);
-  const advance = useCallback(
-    (by) => {
-      const container = containerRef.current;
-      const slideWidth = container./* OK */ offsetWidth / visibleCount;
-      // Modify scrollLeft is preferred to `setRestingIndex` to enable smooth scroll.
-      // Note: `setRestingIndex` will still be called on debounce by scroll handler.
-      container./* OK */ scrollLeft += slideWidth * by;
-    },
-    [visibleCount]
-  );
-  useImperativeHandle(
-    ref,
-    () => ({
-      next: () => advance(advanceCount),
-      prev: () => advance(-advanceCount),
-    }),
-    [advance, advanceCount]
-  );
-  const classes = useStyles();
 
   /**
    * The number of slides we want to place before the
    * reference or resting index. Only needed if loop=true.
    */
   const pivotIndex = Math.floor(children.length / 2);
+
+  const advance = useCallback(
+    (by) => {
+      const container = containerRef.current;
+      if (!container) {
+        return;
+      }
+      const slideWidth = container./* OK */ offsetWidth / visibleCount;
+      // Modify scrollLeft is preferred to `setRestingIndex` when possible
+      // to enable smooth scrolling between slides.
+      // Note: `setRestingIndex` will still be called on debounce by scroll handler.
+      currentIndex.current = mod(currentIndex.current + by, children.length);
+      if (mixedLength) {
+        if (loop) {
+          const newPosition =
+            container.children[mod(pivotIndex + by, children.length)]
+              ./* OK */ offsetLeft;
+          if (container./* OK */ scrollLeft === newPosition) {
+            // There is not enough room to continue scrolling, so manually go to slide.
+            setRestingIndex(currentIndex.current);
+          } else {
+            container./* OK */ scrollLeft = newPosition;
+          }
+        } else {
+          // TODO: If lastSlide.offsetWidth < container.offsetWidth,
+          // the next arrow does not appropriately disable when the
+          // container reaches the end of its scrollWidth.
+          setRestingIndex(currentIndex.current);
+        }
+      } else {
+        container./* OK */ scrollLeft += slideWidth * by;
+      }
+    },
+    [
+      children.length,
+      loop,
+      mixedLength,
+      pivotIndex,
+      setRestingIndex,
+      visibleCount,
+    ]
+  );
+  useImperativeHandle(
+    ref,
+    () => ({
+      advance,
+      next: () => advance(advanceCount),
+      prev: () => advance(-advanceCount),
+    }),
+    [advance, advanceCount]
+  );
+  const classes = useStyles();
 
   /**
    * The dynamic position that the slide at the resting index
@@ -99,11 +137,14 @@ function ScrollerWithRef(
     {
       children,
       loop,
+      mixedLength,
       offsetRef,
       pivotIndex,
       restingIndex,
       snap,
+      snapBy,
       visibleCount,
+      _thumbnails,
     },
     classes
   );
@@ -115,28 +156,51 @@ function ScrollerWithRef(
       return;
     }
     const container = containerRef.current;
+    if (!container.children.length) {
+      return;
+    }
     setStyle(container, 'scrollBehavior', 'auto');
     let position;
     const slideWidth = container./* OK */ offsetWidth / visibleCount;
     if (loop) {
       if (snap) {
-        position = slideWidth * pivotIndex;
+        if (mixedLength) {
+          position = container.children[pivotIndex]./* OK */ offsetLeft;
+        } else {
+          position = slideWidth * pivotIndex;
+        }
       } else {
-        position = mod(
-          scrollOffset.current + slideWidth * offsetRef.current,
-          container./* OK */ scrollWidth
-        );
+        if (mixedLength) {
+          position =
+            container.children[pivotIndex]./* OK */ offsetLeft +
+            scrollOffset.current;
+        } else {
+          position = mod(
+            scrollOffset.current + slideWidth * offsetRef.current,
+            container./* OK */ scrollWidth
+          );
+        }
       }
     } else {
       if (snap) {
-        position = slideWidth * restingIndex;
+        if (mixedLength) {
+          position = container.children[restingIndex]./* OK */ offsetLeft;
+        } else {
+          position = slideWidth * restingIndex;
+        }
       } else {
-        position = scrollOffset.current;
+        if (mixedLength) {
+          position =
+            container.children[restingIndex]./* OK */ offsetLeft +
+            scrollOffset.current;
+        } else {
+          position = scrollOffset.current;
+        }
       }
     }
     container./* OK */ scrollLeft = position;
     setStyle(container, 'scrollBehavior', 'smooth');
-  }, [loop, restingIndex, pivotIndex, snap, visibleCount]);
+  }, [loop, mixedLength, restingIndex, pivotIndex, snap, visibleCount]);
 
   // Trigger render by setting the resting index to the current scroll state.
   const debouncedResetScrollReferencePoint = useMemo(
@@ -164,11 +228,27 @@ function ScrollerWithRef(
   // intermediary renders will interupt scroll and cause jank.
   const updateCurrentIndex = () => {
     const container = containerRef.current;
-    const slideWidth = container./* OK */ offsetWidth / visibleCount;
-    scrollOffset.current =
-      container./* OK */ scrollLeft - offsetRef.current * slideWidth;
-    const slideOffset = Math.round(scrollOffset.current / slideWidth);
-    currentIndex.current = mod(slideOffset, children.length);
+    if (!container) {
+      return;
+    }
+    if (mixedLength) {
+      const acc = {index: 0, width: 0};
+      for (let i = 0; i < container.children.length; i++) {
+        const slide = container.children[i];
+        if (container./* OK */ scrollLeft >= acc.width) {
+          scrollOffset.current = container./* OK */ scrollLeft - acc.width;
+          acc.width += slide./* OK */ scrollWidth;
+          acc.index = loop ? restingIndex - pivotIndex + i : i;
+        }
+      }
+      currentIndex.current = mod(acc.index, children.length);
+    } else {
+      const slideWidth = container./* OK */ offsetWidth / visibleCount;
+      scrollOffset.current =
+        container./* OK */ scrollLeft - offsetRef.current * slideWidth;
+      const slideOffset = Math.round(scrollOffset.current / slideWidth);
+      currentIndex.current = mod(slideOffset, children.length);
+    }
   };
 
   const handleScroll = () => {
@@ -176,16 +256,18 @@ function ScrollerWithRef(
     debouncedResetScrollReferencePoint();
   };
 
+  const incrementCount = Math.max(advanceCount, autoAdvanceCount);
   const needMoreSlidesToScroll =
     loop &&
-    advanceCount > 1 &&
-    children.length - pivotIndex - visibleCount < advanceCount;
+    incrementCount > 1 &&
+    children.length - pivotIndex - visibleCount < incrementCount;
   return (
     <div
       ref={containerRef}
       onScroll={handleScroll}
       class={`${classes.scrollContainer} ${classes.hideScrollbar} ${classes.horizontalScroll}`}
       tabindex={0}
+      {...rest}
     >
       {slides}
       {needMoreSlidesToScroll && slides}
@@ -250,7 +332,18 @@ export {Scroller};
  * @return {PreactDef.Renderable}
  */
 function renderSlides(
-  {children, loop, restingIndex, offsetRef, pivotIndex, snap, visibleCount},
+  {
+    children,
+    loop,
+    mixedLength,
+    restingIndex,
+    offsetRef,
+    pivotIndex,
+    snap,
+    snapBy,
+    visibleCount,
+    _thumbnails,
+  },
   classes
 ) {
   const {length} = children;
@@ -261,9 +354,11 @@ function renderSlides(
         key={key}
         data-slide={index}
         class={`${classes.slideSizing} ${classes.slideElement} ${
-          snap ? classes.enableSnap : classes.disableSnap
-        }`}
-        style={{flex: `0 0 ${100 / visibleCount}%`}}
+          snap && mod(index, snapBy) === 0
+            ? classes.enableSnap
+            : classes.disableSnap
+        } ${_thumbnails ? classes.thumbnails : ''}`}
+        style={{flex: mixedLength ? '0 0 auto' : `0 0 ${100 / visibleCount}%`}}
       >
         {child}
       </div>
